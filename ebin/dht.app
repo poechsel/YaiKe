@@ -4,5 +4,5 @@
   {applications, []},
   {registered, [dht]},
   {mod, {dht, []}},
-  {env, []}
+  {env, [{k, 20}, {alpha, 3}]}
 ]}.

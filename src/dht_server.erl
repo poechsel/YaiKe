@@ -1,21 +1,23 @@
 -module(dht_server).
 -behaviour(gen_server).
 
--export([start_link/0, ping/0]).
+-export([start_link/2, ping/0]).
 -export([init/1, handle_cast/2, handle_info/2, handle_call/3,
          terminate/2, code_change/3]).
 
 %%% Client API
-start_link() ->
-    io:format("probably~n"),
-    gen_server:start_link(?MODULE, [], []).
+start_link(K, Alpha) ->
+    io:format("~p ~p~n", [K, Alpha]),
+    gen_server:start_link(?MODULE, [K, Alpha], []).
 
 ping() ->
     io:format('ping?~n'),
     gen_server:cast(self(), {ping}).
 
 %%% Server functions
-init([]) -> {ok, []}.
+init([K, Alpha]) -> 
+    io:format("~p ~p~n", [K, Alpha]),
+    {ok, [K, Alpha]}.
 
 
 handle_call({ping}, _From, State) ->
