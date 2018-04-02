@@ -1,8 +1,9 @@
 -module(dht).
 -behaviour(application).
--export([start/2, stop/1, ping/0]).
+-export([start/2, stop/1, ping/1]).
  
 start(normal, _Args) ->
+    io:format("args: ~p~n", [_Args]),
     io:format("yes~n"),
     K = get_default(k, 20),
     Alpha = get_default(alpha, 1),
@@ -12,8 +13,8 @@ stop(_State) ->
     ok.
 
 
-ping() ->
-    dht_server:ping().
+ping(Other) ->
+    dht_server:ping(Other).
 
 
 

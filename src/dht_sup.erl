@@ -5,6 +5,7 @@
 -export([init/1]).
 
 start_link(_Args) ->
+    io:format("args: ~p~n", [_Args]),
     supervisor:start_link({local, ?MODULE}, ?MODULE, _Args).
 
 init(_Args) ->
