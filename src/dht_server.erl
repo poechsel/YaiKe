@@ -1,4 +1,5 @@
 -module(dht_server).
+-include("dht.hrl").
 -behaviour(gen_server).
 
 -export([start_link/2, ping/1]).
@@ -33,7 +34,7 @@ gen_server_call(A, B, C) ->
 %%% Server functions
 init([K, Alpha]) -> 
     io:format("~p ~p~n", [K, Alpha]),
-    {ok, [K, Alpha]}.
+    {ok, #state{k=K, alpha=Alpha}}.
 
 
 handle_call(ping, _From, State) ->
