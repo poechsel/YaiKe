@@ -1,7 +1,7 @@
 -module(dht_buckets).
 -include("dht.hrl").
 
--export([update/3]).
+-export([update/3, find_k_nearest/1]).
 
 update(State, Uid_new_node, New_node) ->
     D = dht_utils:distance(State#state.uid, Uid_new_node),
@@ -9,6 +9,21 @@ update(State, Uid_new_node, New_node) ->
     New_bucket = update_bucket(State, array:get(I, State#state.buckets), New_node),
     Buckets = array:set(I, New_bucket, State#state.buckets),
     State#state{buckets=Buckets}.
+
+
+find_k_nearest(State) ->
+    find_k_nearest(State, 0, State#state.alpha, []).
+
+find_k_nearest(_State, _I, 0, Acc) ->
+    Acc;
+
+find_k_nearest(_State, I, _N, Acc) when I >= 160 ->
+    Acc;
+
+find_k_nearest(State, I, N, Acc) ->
+    Bucket = array:get(I, State#state.buckets),
+    find_k_nearest(State, I+1, N - length(Bucket), list:sublist(Bucket, N) ++ Acc).
+
 
 update_bucket(State, Bucket, New_node) ->
     case list:member(New_node, Bucket) of 
