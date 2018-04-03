@@ -11,13 +11,24 @@ start_link(K, Alpha) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
 ping(Other) ->
-    T = gen_server:call({?MODULE, Other}, ping, 1000),
+    T = gen_server_call({?MODULE, Other}, ping, 1000),
     io:format("-> ~p~n", [T]),
     case T of 
         pong -> ok;
         {error, timeout} -> timeout;
         _ -> io:format("error~n"), timeout
     end.
+
+
+
+gen_server_call(A, B, C) ->
+    try
+        gen_server:call(A, B, C)
+    catch
+        exit:{{nodedown, _}, _} ->
+            {error, nodedown}
+    end.
+
 
 %%% Server functions
 init([K, Alpha]) -> 
