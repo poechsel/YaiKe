@@ -1,1 +1,1 @@
--record(state, {k, alpha}).
+-record(state, {k, alpha, uid, buckets=array:new(160, {default, []})}).

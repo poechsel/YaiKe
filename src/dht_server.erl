@@ -9,6 +9,7 @@
 %%% Client API
 start_link(K, Alpha) ->
     io:format("~p ~p~n", [K, Alpha]),
+    io:format("uid: ~p~n", [dht_utils:hash(node())]),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
 ping(Other) ->
@@ -16,8 +17,8 @@ ping(Other) ->
     io:format("-> ~p~n", [T]),
     case T of 
         pong -> ok;
-        {error, timeout} -> timeout;
-        _ -> io:format("error~n"), timeout
+        {error, timeout} -> error;
+        _ -> error
     end.
 
 

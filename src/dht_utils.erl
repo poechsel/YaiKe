@@ -1,9 +1,9 @@
 -module(dht_utils).
 
--export([hash_atom/1, hash/1, distance/2]).
+-export([hash/1, distance/2]).
 
-hash_atom(Atom) ->
-    hash(atom_to_binary(Atom, utf8)).
+hash(Atom) when is_atom(Atom)->
+    hash(atom_to_binary(Atom, utf8));
 
 hash(Object) ->
     H = crypto:hash(sha, Object),
