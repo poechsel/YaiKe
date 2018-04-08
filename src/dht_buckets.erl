@@ -15,7 +15,7 @@ find_k_nearest_self(_State, I, _N, Acc) when I >= 160 ->
 
 find_k_nearest_self(State, I, N, Acc) ->
     Bucket = array:get(I, State#state.buckets),
-    find_k_nearest_self(State, I+1, N - length(Bucket), list:sublist(Bucket, N) ++ Acc).
+    find_k_nearest_self(State, I+1, N - length(Bucket), lists:sublist(Bucket, N) ++ Acc).
 
 
 
@@ -30,8 +30,8 @@ find_k_nearest(_State, I, _M, _Node, Acc) when I >= 160 ->
 find_k_nearest(State, I, M, {Uid_Node, _} = Node, Acc) ->
     Bucket = array:get(I, State#state.buckets),
     Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Uid_Node) =< (U2 bxor Uid_Node) end,
-    SBucket = list:sort(Fun, Bucket),
-    find_k_nearest(State, I+1, M, Node, list:sublist(list:merge(Fun, Acc, SBucket), M)).
+    SBucket = lists:sort(Fun, Bucket),
+    find_k_nearest(State, I+1, M, Node, lists:sublist(lists:merge(Fun, Acc, SBucket), M)).
 
 
 
@@ -46,7 +46,7 @@ update(State, {Uid_new_node, _} = Node) ->
 
 
 update_bucket(State, Bucket, New_node) ->
-    case list:member(New_node, Bucket) of 
+    case lists:member(New_node, Bucket) of 
         true ->
             Bucket;
         false ->
@@ -56,10 +56,11 @@ update_bucket(State, Bucket, New_node) ->
                 false ->
                     [H | T] = Bucket,
                     case dht_server:ping(H) of
-                        ok -> Bucket;
+                        {ok, _} -> Bucket;
                         _ -> [New_node | T]
                     end
             end
+
     end.
 
 

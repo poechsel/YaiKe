@@ -13,13 +13,11 @@ start_link(K, Alpha) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
 ping({_, Other}) ->
-    T = gen_server_call({?MODULE, Other}, ping, 1000),
-    io:format("-> ~p~n", [T]),
-    case T of 
-        pong -> ok;
-        {error, timeout} -> error;
-        _ -> error
-    end.
+    gen_server_call(?MODULE, {request_ping, Other}, 1000);
+
+ping(Other) ->
+    Uid = dht_utils:hash(Other),
+    ping({Uid, Other}).
 
 
 
@@ -28,19 +26,38 @@ gen_server_call(A, B, C) ->
         gen_server:call(A, B, C)
     catch
         exit:{{nodedown, _}, _} ->
-            {error, nodedown}
+            {error, nodedown};
+        exit:{timeout, _} ->
+            {error, timeout};
+        _:x ->  
+            {error, timeout}
     end.
 
 
 %%% Server functions
 init([K, Alpha]) -> 
     io:format("~p ~p~n", [K, Alpha]),
-    {ok, #state{k=K, alpha=Alpha}}.
+    {ok, #state{k=K, alpha=Alpha, uid = dht_utils:hash(node())}}.
 
 
-handle_call(ping, _From, State) ->
+handle_call({request_ping, Other}, _, State) ->
+    T = gen_server_call({?MODULE, Other}, {ping, {State#state.uid, node()}}, 1000),
+    {Out, NewState} = case T of 
+              {pong, Target} -> {ok, dht_buckets:update(State, Target)};
+              {error, timeout} -> {error, State};
+              _ -> {error, State}
+    end,
+    { reply, Out, NewState };
+
+
+
+handle_call({ping, Node}, _From, State) ->
+    Routing_table = dht_buckets:update(State, Node),
     io:format('pong!~n'),
-    { reply, pong, State }.
+    { reply, {pong, {State#state.uid, node()}}, Routing_table }.
+
+
+
 
 % temp
 handle_cast(ping, State) ->
