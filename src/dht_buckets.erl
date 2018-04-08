@@ -1,28 +1,48 @@
 -module(dht_buckets).
 -include("dht.hrl").
 
--export([update/3, find_k_nearest/1]).
+-export([update/2, find_k_nearest_self/1, find_k_nearest/3]).
 
-update(State, Uid_new_node, New_node) ->
+% find the k nearest State from our curent node
+find_k_nearest_self(State) ->
+    find_k_nearest_self(State, 0, State#state.k, []).
+
+find_k_nearest_self(_State, _I, 0, Acc) ->
+    Acc;
+
+find_k_nearest_self(_State, I, _N, Acc) when I >= 160 ->
+    Acc;
+
+find_k_nearest_self(State, I, N, Acc) ->
+    Bucket = array:get(I, State#state.buckets),
+    find_k_nearest_self(State, I+1, N - length(Bucket), list:sublist(Bucket, N) ++ Acc).
+
+
+
+
+% find the m nearest State from a given node
+find_k_nearest(State, M, Node) ->
+    find_k_nearest(State, 0, M, Node, []).
+
+find_k_nearest(_State, I, _M, _Node, Acc) when I >= 160 ->
+    Acc;
+
+find_k_nearest(State, I, M, {Uid_Node, _} = Node, Acc) ->
+    Bucket = array:get(I, State#state.buckets),
+    Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Uid_Node) =< (U2 bxor Uid_Node) end,
+    SBucket = list:sort(Fun, Bucket),
+    find_k_nearest(State, I+1, M, Node, list:sublist(list:merge(Fun, Acc, SBucket), M)).
+
+
+
+
+update(State, {Uid_new_node, _} = Node) ->
     D = dht_utils:distance(State#state.uid, Uid_new_node),
     I = find_power_two(D),
-    New_bucket = update_bucket(State, array:get(I, State#state.buckets), New_node),
+    New_bucket = update_bucket(State, array:get(I, State#state.buckets), Node),
     Buckets = array:set(I, New_bucket, State#state.buckets),
     State#state{buckets=Buckets}.
 
-
-find_k_nearest(State) ->
-    find_k_nearest(State, 0, State#state.alpha, []).
-
-find_k_nearest(_State, _I, 0, Acc) ->
-    Acc;
-
-find_k_nearest(_State, I, _N, Acc) when I >= 160 ->
-    Acc;
-
-find_k_nearest(State, I, N, Acc) ->
-    Bucket = array:get(I, State#state.buckets),
-    find_k_nearest(State, I+1, N - length(Bucket), list:sublist(Bucket, N) ++ Acc).
 
 
 update_bucket(State, Bucket, New_node) ->

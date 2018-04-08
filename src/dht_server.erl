@@ -12,7 +12,7 @@ start_link(K, Alpha) ->
     io:format("uid: ~p~n", [dht_utils:hash(node())]),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
-ping(Other) ->
+ping({_, Other}) ->
     T = gen_server_call({?MODULE, Other}, ping, 1000),
     io:format("-> ~p~n", [T]),
     case T of 
