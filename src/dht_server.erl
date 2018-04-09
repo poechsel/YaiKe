@@ -67,20 +67,12 @@ init([K, Alpha]) ->
     {ok, #state{k=K, alpha=Alpha, uid = dht_utils:hash(node())}}.
 
 
-handle_call({request_ping, Other}, _, State) ->
-    T = gen_server_call({?MODULE, Other}, {ping, {State#state.uid, node()}}, 1000),
-    Out = case T of 
-              {pong, Target} -> dht_routing:update(Target), ok;
-              {error, timeout} -> error;
-              _ -> error
-    end,
-    { reply, Out, State };
+handle_call({request_ping, Other}, _From, State) ->
+    gen_server:cast({?MODULE, Other}, {ping, {State#state.uid, node()}, _From}),
+    { noreply, State }.
 
 
 
-handle_call({ping, Node}, _From, State) ->
-    dht_routing:update(Node),
-    { reply, {pong, {State#state.uid, node()}}, State }.
 
 
 
@@ -92,6 +84,17 @@ handle_cast({ask_k_nearest, {Uid, Ip}, Ref}, State) ->
     io:format("REACHING ~p~n", [Ip]),
     gen_server:cast({?MODULE, Ip}, {find_nodes_receive, Nearest, Ref}),
     io:format("REACHED ~p~n", [Ip]),
+    { noreply, State };
+
+
+handle_cast({ping, {_, Ip} = Node, _From}, State) ->
+    dht_routing:update(Node),
+    gen_server:cast({?MODULE, Ip}, {pong, {State#state.uid, node()}, _From}),
+    { noreply, State };
+
+handle_cast({pong, Node, _From}, State) ->
+    dht_routing:update(Node),
+    gen_server:reply(_From, ok),
     { noreply, State };
 
 handle_cast({find_nodes_init, Target, Ref}, State) ->
