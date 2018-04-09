@@ -10,6 +10,7 @@
 start_link(K, Alpha) ->
     io:format("~p ~p~n", [K, Alpha]),
     io:format("uid: ~p~n", [dht_utils:hash(node())]),
+    dht_routing_sup:start_link([K, Alpha, dht_utils:hash(node())]),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
 ping({_, Other}) ->
@@ -20,7 +21,7 @@ ping(Other) ->
     ping({Uid, Other}).
 
 debug() ->
-    gen_server_call(?MODULE, debug, 1000).
+    dht_routing:debug().
 
 
 
@@ -68,37 +69,33 @@ init([K, Alpha]) ->
 
 handle_call({request_ping, Other}, _, State) ->
     T = gen_server_call({?MODULE, Other}, {ping, {State#state.uid, node()}}, 1000),
-    {Out, NewState} = case T of 
-              {pong, Target} -> {ok, dht_buckets:update(State, Target)};
-              {error, timeout} -> {error, State};
-              _ -> {error, State}
+    Out = case T of 
+              {pong, Target} -> dht_routing:update(Target), ok;
+              {error, timeout} -> error;
+              _ -> error
     end,
-    { reply, Out, NewState };
+    { reply, Out, State };
 
 
 
 handle_call({ping, Node}, _From, State) ->
-    Routing_table = dht_buckets:update(State, Node),
-    { reply, {pong, {State#state.uid, node()}}, Routing_table };
+    dht_routing:update(Node),
+    { reply, {pong, {State#state.uid, node()}}, State }.
 
 
-
-handle_call(debug, _, State) ->
-    io:format("BUCKETS ~p~n", [State#state.buckets]),
-    { reply, ok, State }.
 
 
 % temp
 handle_cast({ask_k_nearest, {Uid, Ip}, Ref}, State) ->
     io:format("I was called, targeting ~p~n", [Ip]),
-    Nearest = dht_buckets:find_k_nearest(State, Uid, State#state.k),
+    Nearest = dht_routing:find_k_nearest(Uid, State#state.k),
     io:format("REACHING ~p~n", [Ip]),
     gen_server:cast({?MODULE, Ip}, {find_nodes_receive, Nearest, Ref}),
     io:format("REACHED ~p~n", [Ip]),
     { noreply, State };
 
 handle_cast({find_nodes_init, Target, Ref}, State) ->
-    Start_point = dht_buckets:find_k_nearest(State, Target, State#state.alpha),
+    Start_point = dht_routing:find_k_nearest(Target, State#state.alpha),
     Seen = sets:from_list(Start_point),
     io:format("RECEIVING FROM ~p ~p~n", [node(), self()]),
     lists:map(fun ({_Uid, Ip}) -> io:format("calling ~p~n", [Ip]),gen_server:cast({?MODULE, Ip}, {ask_k_nearest, {State#state.uid, node()}, Ref}) end, Start_point),

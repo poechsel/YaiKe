@@ -1,1 +1,2 @@
 -record(state, {k, alpha, uid, buckets=array:new(160, {default, []})}).
+-record(routing, {k, alpha, uid, buckets=array:new(160, {default, []})}).
