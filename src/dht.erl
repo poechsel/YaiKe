@@ -1,6 +1,6 @@
 -module(dht).
 -behaviour(application).
--export([start/2, stop/1, ping/1]).
+-export([start/2, stop/1, ping/1, debug/0, find_nodes/1]).
  
 start(normal, _Args) ->
     io:format("args: ~p~n", [_Args]),
@@ -13,8 +13,14 @@ stop(_State) ->
     ok.
 
 
+find_nodes(Target) ->
+    dht_server:find_nodes(Target).
+
 ping(Other) ->
     dht_server:ping(Other).
+
+debug() ->
+    dht_server:debug().
 
 
 

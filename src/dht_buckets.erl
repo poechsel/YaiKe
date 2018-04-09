@@ -27,11 +27,11 @@ find_k_nearest(State, M, Node) ->
 find_k_nearest(_State, I, _M, _Node, Acc) when I >= 160 ->
     Acc;
 
-find_k_nearest(State, I, M, {Uid_Node, _} = Node, Acc) ->
+find_k_nearest(State, I, M, Uid_Node, Acc) ->
     Bucket = array:get(I, State#state.buckets),
     Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Uid_Node) =< (U2 bxor Uid_Node) end,
     SBucket = lists:sort(Fun, Bucket),
-    find_k_nearest(State, I+1, M, Node, lists:sublist(lists:merge(Fun, Acc, SBucket), M)).
+    find_k_nearest(State, I+1, M, Uid_Node, lists:sublist(lists:merge(Fun, Acc, SBucket), M)).
 
 
 
