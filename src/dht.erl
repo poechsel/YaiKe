@@ -4,8 +4,6 @@
 -export([start/2, stop/1, ping/1, debug/0, find_nodes/1]).
  
 start(normal, _Args) ->
-    io:format("args: ~p~n", [_Args]),
-    io:format("yes~n"),
     K = get_default(k, 20),
     Alpha = get_default(alpha, 1),
     dht_sup:start_link([K, Alpha]).
