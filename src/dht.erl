@@ -1,7 +1,7 @@
 -module(dht).
 -behaviour(application).
 
--export([start/2, stop/1, ping/1, debug/0, find_nodes/1, store/1]).
+-export([start/2, stop/1, ping/1, debug/0, find_nodes/1, store/1, find_value/1]).
  
 start(normal, _Args) ->
     K = get_default(k, 20),
@@ -14,6 +14,9 @@ stop(_State) ->
 
 find_nodes(Target) ->
     dht_server:find_nodes(Target).
+
+find_value(Hash) ->
+    dht_server:find_value(Hash).
 
 store(Value) ->
     dht_server:store(Value).

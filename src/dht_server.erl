@@ -2,7 +2,7 @@
 -include("dht.hrl").
 -behaviour(gen_server).
 
--export([start_link/2, ping/1, debug/0, find_node/1, store/1]).
+-export([start_link/2, ping/1, debug/0, find_node/1, store/1, find_value/1]).
 -export([init/1, handle_cast/2, handle_info/2, handle_call/3,
          terminate/2, code_change/3]).
 
@@ -46,6 +46,9 @@ find_node(Target) ->
     io:format("RESULT ~n~p~nENDRESULT~n", [R]),
     R.
 
+find_value(Hash) ->
+    gen_server_call(?MODULE, {lookup_value, Hash}, 10000).
+
 store(Value) ->
     Hash = dht_utils:hash(Value),
     Nodes = find_node(Hash),
@@ -68,12 +71,10 @@ lookup_nodes_loop(_Target, _From, Old, _Seen, Expected, _K) when Expected =< 0 -
     Old;
 
 lookup_nodes_loop(Target, _From, Old, Seen, Expected, K) ->
-    io:format("~p ~p~n", [Expected, self()]),
     Me = self(),
     Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Target) =< (U2 bxor Target) end,
     Sorted = receive
-                 Received ->
-                     lists:sort(Fun, Received)
+                 Received -> lists:sort(Fun, Received)
              end,
     Current = lists:sublist(lists:usort(Fun, lists:merge(Fun, Old, Sorted)), K),
     Unvisited = lists:filter(fun (O) -> not(sets:is_element(O, Seen)) end, Current),
@@ -99,6 +100,63 @@ lookup_nodes(Hash, _From, K, Alpha) ->
     gen_server:reply(_From, Nearest).
 
 
+
+
+lookup_value_wrapper(Owner_pid, {_, Owner_ip} = Owner, Hash) ->
+    Present = gen_server_call({?MODULE, Owner_ip}, {store_contains, Owner, Hash}, 1000),
+    case Present of 
+        { error, _ } ->
+            Owner_pid ! { notfound, [] };
+        { found, Value } ->
+            Owner_pid ! { found, Value };
+        { notfound } ->
+            Out = case gen_server_call({?MODULE, Owner_ip}, {request_k_nearest, Owner, Hash}, 1000) of
+                {error, _} ->
+                    [];
+                Received ->
+                    Received
+            end,
+            Owner_pid ! { notfound, Out }
+    end.
+
+lookup_value_loop(_Target, _From, _Old, _Seen, Expected, _K) when Expected =< 0 ->
+    { notfound };
+
+lookup_value_loop(Target, _From, Old, Seen, Expected, K) ->
+    Me = self(),
+    Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Target) =< (U2 bxor Target) end,
+    receive
+        { found, Value } ->
+            { found, Value };
+        { notfound, Received } ->
+            Sorted = lists:sort(Fun, Received),
+            Current = lists:sublist(lists:usort(Fun, lists:merge(Fun, Old, Sorted)), K),
+            Unvisited = lists:filter(fun (O) -> not(sets:is_element(O, Seen)) end, Current),
+            case (Unvisited =:= []) of
+                true ->
+                    lookup_value_loop(Target, _From, Current, Seen, Expected - 1, K);
+                false ->
+                    [ Next | _ ] = Unvisited,
+                    spawn(fun () -> lookup_value_wrapper(Me, Next, Target) end),
+                    New_seen = sets:add_element(Next, Seen),
+                    lookup_value_loop(Target, _From, Current, New_seen, Expected, K)
+            end
+    end.
+
+lookup_value(Hash, _From, K, Alpha) ->
+    Me = self(),
+    Start = dht_routing:find_k_nearest(Hash, Alpha),
+    Seen = sets:from_list(Start),
+    lists:map(fun (Node) ->
+        spawn(fun () -> lookup_value_wrapper(Me, Node, Hash) end) end,
+        Start
+    ),
+    Nearest = lookup_value_loop(Hash, _From, Start, Seen, length(Start), K),
+    gen_server:reply(_From, Nearest).
+
+
+
+
 %%% Server functions
 init([K, Alpha]) -> 
     {ok, #state{k=K, alpha=Alpha, uid = dht_utils:hash(node())}}.
@@ -112,6 +170,21 @@ handle_call({request_k_nearest, Node, Target}, _From, State) ->
     dht_routing:update(Node),
     Nearest = dht_routing:find_k_nearest(Target, State#state.k),
     { reply, Nearest, State };
+
+handle_call({store_contains, Node, Hash}, _From, State) ->
+    dht_routing:update(Node),
+    Out = case maps:find(Hash, State#state.store) of
+              error ->
+                  { notfound };
+              { ok, Value } ->
+                  { found, Value }
+          end,
+    { reply, Out, State };
+
+
+handle_call({lookup_value, Hash}, _From, State) ->
+    spawn(fun () -> lookup_value(Hash, _From, State#state.k, State#state.alpha) end),
+    {noreply, State};
 
 handle_call({lookup_nodes, Hash}, _From, State) ->
     spawn(fun () -> lookup_nodes(Hash, _From, State#state.k, State#state.alpha) end),
