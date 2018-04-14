@@ -17,8 +17,11 @@ ping({_, Other}) ->
     gen_server_call(?MODULE, {request_ping, Other}, 1000);
 
 ping(Other) ->
+    io:format("Starting ping~n"),
     Uid = dht_utils:hash(Other),
-    ping({Uid, Other}).
+    X = ping({Uid, Other}),
+    io:format("Stopping ping~n"),
+    X.
 
 debug() ->
     dht_routing:debug().
@@ -40,26 +43,9 @@ gen_server_call(A, B, C) ->
 
 find_node(Target) ->
     Ref = make_ref(),
-    gen_server:cast(?MODULE, {find_nodes_init, Target, Ref}),
-    receive
-        {find_nodes_close, Ref_, Nearest} when Ref =:= Ref_ ->
-            Nearest
-    end.
-
-find_nodes_iter(Target, Seen, Nearest_old, Ref, K) ->
-    Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Target) =< (U2 bxor Target) end,
-    receive 
-        { find_nodes_upd, Nearest_news, Ref_Msg} when Ref_Msg =:= Ref ->
-            Nearest_old_ = lists:sort(Fun, Nearest_old),
-            Nearest_news_ = lists:sort(Fun, Nearest_news),
-            case Nearest_old_ =:= Nearest_news_ of
-                true -> 
-                    Nearest_old_;
-                false ->
-                    Nearest = lists:sublist(lists:merge(Fun, Nearest_old_, Nearest_news_), K),
-                    Nearest
-            end
-    end.
+    R = gen_server:call(?MODULE, {find_nodes, Target, Ref}),
+    io:format("RESULT ~p~n~p~nENDRESULT~n", [Ref, R]),
+    R.
 
 
 %%% Server functions
@@ -69,23 +55,23 @@ init([K, Alpha]) ->
 
 handle_call({request_ping, Other}, _From, State) ->
     gen_server:cast({?MODULE, Other}, {ping, {State#state.uid, node()}, _From}),
-    { noreply, State }.
-
-
-
-
-
-
-
-% temp
-handle_cast({ask_k_nearest, {Uid, Ip}, Ref}, State) ->
-    io:format("I was called, targeting ~p~n", [Ip]),
-    Nearest = dht_routing:find_k_nearest(Uid, State#state.k),
-    io:format("REACHING ~p~n", [Ip]),
-    gen_server:cast({?MODULE, Ip}, {find_nodes_receive, Nearest, Ref}),
-    io:format("REACHED ~p~n", [Ip]),
     { noreply, State };
 
+handle_call({find_nodes, Hash, Ref}, _From, State) ->
+    Start = dht_routing:find_k_nearest(Hash, State#state.alpha),
+    io:format("initializer ~p~n", [Start]),
+    Seen = sets:from_list(Start),
+    case length(Start) of
+        0 -> 
+            { reply, [], State};
+        _ ->
+            lists:map(fun ({_, Ip}) -> io:format("calling ~p~n", [Ip]),gen_server:cast({?MODULE, Ip}, {find_nodes_atom, {State#state.uid, node()}, Hash, Ref}) end, Start),
+            Processing = maps:put(Ref,
+                                  % missing nearest here TODO
+                          #find_nodes_entry{from=_From, hash=Hash, seen=Seen},
+                          State#state.processing),
+            {noreply, State#state{processing=Processing}}
+    end.
 
 handle_cast({ping, {_, Ip} = Node, _From}, State) ->
     dht_routing:update(Node),
@@ -97,21 +83,47 @@ handle_cast({pong, Node, _From}, State) ->
     gen_server:reply(_From, ok),
     { noreply, State };
 
-handle_cast({find_nodes_init, Target, Ref}, State) ->
-    Start_point = dht_routing:find_k_nearest(Target, State#state.alpha),
-    Seen = sets:from_list(Start_point),
-    io:format("RECEIVING FROM ~p ~p~n", [node(), self()]),
-    lists:map(fun ({_Uid, Ip}) -> io:format("calling ~p~n", [Ip]),gen_server:cast({?MODULE, Ip}, {ask_k_nearest, {State#state.uid, node()}, Ref}) end, Start_point),
-    Nearest = find_nodes_iter(Target, Seen, Start_point, Ref, State#state.k),
-    self() ! {find_nodes_closed, Ref, Nearest},
+
+
+handle_cast({find_nodes_atom, {_, Ip} = Node, Hash, Ref}, State) ->
+    io:format("I was called to get atomic stuff~n"),
+    dht_routing:update(Node),
+    io:format("done updating dht table~n"),
+    Nearest = dht_routing:find_k_nearest(Hash, State#state.k),
+    io:format("Result of node ~p is ~p ~n", [node(), Nearest]),
+    gen_server:cast({?MODULE, Ip}, {find_nodes_update, Nearest, Ref}),
+    io:format("casting answer message~n"),
     { noreply, State };
 
-
-
-handle_cast({find_nodes_receive, Nearest, Ref}, State) ->
-    io:format("SENDING to ~p ~p~n", [node(), self()]),
-    self() ! {find_nodes_upd, Nearest, Ref},
-    { noreply, State }.
+handle_cast({find_nodes_update, Nearest, Ref}, State) ->
+    io:format("updating informations on find node~n"),
+    Processing = 
+    case maps:find(Ref, State#state.processing) of
+        {ok, Entry} ->
+            Target = Entry#find_nodes_entry.hash,
+            Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Target) =< (U2 bxor Target) end,
+            Old = lists:sort(Fun, Entry#find_nodes_entry.nearest),
+            Current = lists:sort(Fun, Nearest),
+            io:format("RECEIVED ~p ~p ~n", [Old, Current]),
+            Unvisited = lists:filter(fun (O) -> not(sets:is_element(O, Entry#find_nodes_entry.seen)) end, Current),
+            case (Old =:= Current) or (Unvisited =:= []) of 
+                true -> 
+                    From = Entry#find_nodes_entry.from,
+                    gen_server:reply(From, Current),
+                    maps:remove(Ref, State#state.processing);
+                false ->
+                    % also send new ones (in theory)
+                    [{_, Next_ip} = Next | _] = Unvisited,
+                    gen_server:cast({?MODULE, Next_ip}, {find_nodes_atom, Next, Target, Ref}),
+                    New = lists:sublist(lists:merge(Fun, Old, Current), State#state.k),
+                    E = Entry#find_nodes_entry{nearest=New, seen=sets:add_element(Next, Entry#find_nodes_entry.seen)},
+                    maps:update(Ref, E, State#state.processing)
+            end;
+        _ ->
+            %io:format("BUUUUUUUUG~n"),
+            State#state.processing
+    end,
+    { noreply, State#state{processing=Processing} }.
 
 
 handle_info(Msg, State) ->

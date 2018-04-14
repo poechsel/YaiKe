@@ -1,2 +1,3 @@
--record(state, {k, alpha, uid}).
+-record(state, {k, alpha, uid, processing=maps:new()}).
+-record(find_nodes_entry, {from, hash, nearest=[], seen=sets:new()}).
 -record(routing, {k, alpha, uid, buckets=array:new(160, {default, []})}).
