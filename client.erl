@@ -2,7 +2,7 @@
 
 -export([spawn_agent/1, get_archive/1, hello/0, send_code/1, uncompress_and_load/1]).
 -behaviour(gen_server).
--export([handle_call/3, handle_cast/2, start_link/0, init/1]).
+-export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2]).
 
 
 
@@ -31,20 +31,32 @@ uncompress_and_load(Stream) ->
     application:start(dht).
 
 spawn_agent(Node) ->
-    case net_adm:ping(Node) of
-        pong -> 
-            send_code(Node),
-            Stream = get_archive("ebin/"),
-            rpc:call(Node, ?MODULE, uncompress_and_load, [Stream]);
-        pang -> io:format("Node not reachable~n")
-    end.
+    gen_server:call(?MODULE, {spawn_agent, Node}).
 
 
 init(_) ->
-    {ok, {}}.
+    {ok, sets:new()}.
 
-handle_call(_, _From, State) ->
+handle_call({spawn_agent, Node}, _From, State) ->
+    case net_adm:ping(Node) of
+        pong -> 
+            erlang:monitor_node(Node, true),
+            send_code(Node),
+            Stream = get_archive("ebin/"),
+            rpc:call(Node, ?MODULE, uncompress_and_load, [Stream]),
+            {reply, ok, sets:add_element(Node, State) };
+        pang -> 
+            {reply, unreachable, State}
+    end;
+
+handle_call(X, _From, State) ->
+    io:format("CALL: ~p~n", [X]),
     {reply, [], State}.
 
-handle_cast(_, State) ->
+handle_cast(X, State) ->
+    io:format("CALL: ~p~n", [X]),
     {noreply, [], State}.
+
+handle_info({nodedown, Node}, State) ->
+    io:format("Node ~p has stopped working~n", [Node]),
+    { noreply, sets:del_element(Node, State) }.
