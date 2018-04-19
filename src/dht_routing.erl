@@ -3,7 +3,7 @@
 
 -behavior(gen_server).
 
--export([update/1, find_k_nearest_self/1, find_k_nearest/2, debug/0]).
+-export([update/1, find_k_nearest_self/1, find_k_nearest/2, debug/0, get_representant_bucket/0, get_representant_bucket/1]).
 
 -export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -32,7 +32,7 @@ find_k_nearest_self(_State, I, _N, Acc) when I >= 160 ->
     Acc;
 
 find_k_nearest_self(State, I, N, Acc) ->
-    Bucket = array:get(I, State#routing.buckets),
+    {_, Bucket} = array:get(I, State#routing.buckets),
     find_k_nearest_self(State, I+1, N - length(Bucket), lists:sublist(Bucket, N) ++ Acc).
 
 
@@ -46,7 +46,7 @@ find_k_nearest(_State, I, _M, _Node, Acc) when I >= 160 ->
     Acc;
 
 find_k_nearest(State, I, M, Uid_Node, Acc) ->
-    Bucket = array:get(I, State#routing.buckets),
+    {_, Bucket} = array:get(I, State#routing.buckets),
     Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Uid_Node) =< (U2 bxor Uid_Node) end,
     SBucket = lists:sort(Fun, Bucket),
     find_k_nearest(State, I+1, M, Uid_Node, lists:sublist(lists:merge(Fun, Acc, SBucket), M)).
@@ -59,8 +59,8 @@ update(Node) ->
 
 
 
-update_bucket(State, Bucket, New_node) ->
-    case lists:member(New_node, Bucket) of 
+update_bucket(State, {_, Bucket}, New_node) ->
+    L = case lists:member(New_node, Bucket) of 
         true ->
             Bucket;
         false ->
@@ -75,7 +75,30 @@ update_bucket(State, Bucket, New_node) ->
                     end
             end
 
-    end.
+    end,
+    {erlang:system_time(millisecond), L}.
+
+
+get_representant_bucket(Pred, Buckets) ->
+    lists:filtermap(
+          fun ({Time, Bucket}) ->
+                  case (Pred(Time)) or (length(Bucket) =:= 0) of
+                      true -> false;
+                      _ -> {true, lists:nth(rand:uniform(length(Bucket)), Bucket)}
+                  end
+          end,
+          array:to_list(Buckets)).
+
+get_representant_bucket() ->
+    gen_server:call(?MODULE, {get_representant_bucket, fun (_) -> true end}).
+
+get_representant_bucket(Pred) ->
+    gen_server:call(?MODULE, {get_representant_bucket, Pred}).
+
+
+handle_call({get_representant_bucket, Pred}, _From, State) ->
+    R = get_representant_bucket(Pred, State#routing.buckets),
+    { reply, R, State};
 
 
 handle_call({find_k_nearest, M, Node}, _From, State) ->
@@ -86,7 +109,11 @@ handle_call(debug, _From, State) ->
     io:format("BUCKETS ~p~n", [State#routing.buckets]),
     { reply, ok, State }.
 
-handle_cast({update, {Uid_new_node, _} = Node}, State) ->
+handle_cast({update, {Uid_new_node, _}}, #routing{uid=Uid}=State) when Uid =:= Uid_new_node ->
+    { noreply, State };
+
+handle_cast({update, {Uid_new_node, Ip} = Node}, State) ->
+    io:format("[~p]: new connection ~p]~n", [node(), Ip]),
     D = dht_utils:distance(State#routing.uid, Uid_new_node),
     I = find_power_two(D),
     New_bucket = update_bucket(State, array:get(I, State#routing.buckets), Node),
@@ -102,6 +129,7 @@ find_power_two(N, I, C) when 2 * C > N ->
 
 find_power_two(N, I, C) ->
     find_power_two(N, I+1, 2*C).
+
 
 handle_info(Msg, State) ->
     io:format("Unexpected message: ~p~n",[Msg]),

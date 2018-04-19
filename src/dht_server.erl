@@ -63,6 +63,7 @@ lookup_nodes_wrapper(Owner_pid, {_, Owner_ip} = Owner, Target) ->
         {error, _} ->
             [];
         Received ->
+            dht_routing:update(Owner),
             Received
     end,
     Owner_pid ! Out.
@@ -159,6 +160,7 @@ lookup_value(Hash, _From, K, Alpha) ->
 
 %%% Server functions
 init([K, Alpha]) -> 
+    timer:send_interval(erlang:convert_time_unit(10, second, millisecond), refresh_table),
     {ok, #state{k=K, alpha=Alpha, uid = dht_utils:hash(node())}}.
 
 
@@ -207,6 +209,18 @@ handle_cast({pong, Node, _From}, State) ->
     { noreply, State }.
 
 
+handle_info(refresh_table, State) ->
+    CTime = erlang:system_time(millisecond),
+    OffsetTime = erlang:convert_time_unit(50, second, millisecond),
+    Representants = dht_routing:get_representant_bucket(
+                      fun (Time) -> (CTime - Time) < OffsetTime end),
+    lists:foreach(
+      fun ({H, Ip}) ->
+              io:format("[~p]: refreshing: ~p ~p~n", [node(), H, Ip]),
+              spawn(fun () -> gen_server_call(?MODULE, {lookup_nodes, H}, 10000) end)
+      end,
+                  Representants),
+    { noreply, State };
 
 handle_info(Msg, State) ->
     io:format("Unexpected message: ~p~n",[Msg]),
