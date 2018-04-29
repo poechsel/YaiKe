@@ -27,7 +27,7 @@ debug() ->
     dht_routing:debug().
 
 broadcast() ->
-    gen_server:cast(?MODULE, {broadcast, "a", 0}).
+    gen_server:cast(?MODULE, {broadcast, make_ref(), "a", 0}).
 
 
 
@@ -211,28 +211,39 @@ handle_cast({pong, Node, _From}, State) ->
     gen_server:reply(_From, ok),
     { noreply, State };
 
-handle_cast({broadcast, Msg, Height}, State) ->
-    NewState = handle_broadcast(Msg, State),
-    dht_routing:iter(fun (I, Bucket) ->
-                             case (I >= Height) and (length(Bucket) > 0) of 
-                                 true ->
-                                     {_, Ip} = lists:nth(rand:uniform(length(Bucket)), Bucket),
-                                     gen_server:cast({?MODULE, Ip}, {broadcast, Msg, I+1})
-                                     ;
-                                 _ -> 1
-                             end
-                     end
-                    ),
-    { noreply, NewState }
+handle_cast({broadcast, Ref, Msg, Height}, State) ->
+    OffsetTime = erlang:convert_time_unit(60*60, second, millisecond),
+    CTime = dht_utils:time_now(),
+    FQueries = maps:filter(
+               fun (_, Time) -> (CTime - Time) < OffsetTime end,
+               State#state.queries),
+    FState = State#state{queries=FQueries},
+    NewState = case (maps:find(Ref, FState#state.queries)) of
+                   error ->
+                       NS = handle_broadcast(Msg, FState),
+                       dht_routing:iter(fun (I, Bucket) ->
+                                                case (I >= Height) and (length(Bucket) > 0) of 
+                                                    true ->
+                                                        {_, Ip} = lists:nth(rand:uniform(length(Bucket)), Bucket),
+                                                        gen_server:cast({?MODULE, Ip}, {broadcast, Ref, Msg, I+1})
+                                                        ;
+                                                    _ -> 1
+                                                end
+                                        end
+                                       ),
+                       NS;
+                   { ok, _ } -> FState
+               end,
+    { noreply, NewState#state{queries=maps:put(Ref, dht_utils:time_now(), NewState#state.queries)} }
 .
 
 handle_broadcast(_, State) ->
-    io:format("Boradcast received on ~p~n", [node()]),
+    io:format("Broadcast received on ~p~n", [node()]),
     State.
 
 
 handle_info(refresh_table, State) ->
-    CTime = erlang:system_time(millisecond),
+    CTime = dht_utils:time_now(),
     OffsetTime = erlang:convert_time_unit(50, second, millisecond),
     Representants = dht_routing:get_representant_bucket(
                       fun (Time) -> (CTime - Time) < OffsetTime end),

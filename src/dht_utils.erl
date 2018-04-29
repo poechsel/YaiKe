@@ -1,6 +1,6 @@
 -module(dht_utils).
 
--export([hash/1, distance/2]).
+-export([hash/1, distance/2, time_now/0]).
 
 hash(Atom) when is_atom(Atom)->
     hash(atom_to_binary(Atom, utf8));
@@ -18,6 +18,9 @@ binary_hash_to_integer(<<H, T/binary>>, Acc) ->
 
 binary_hash_to_integer(<<>>, Acc) -> 
     Acc.
+
+time_now() ->
+    erlang:system_time(millisecond).
 
 
 distance(A, B) ->

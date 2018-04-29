@@ -88,7 +88,7 @@ update_bucket(State, {_, Bucket}, New_node) ->
             end
 
     end,
-    {erlang:system_time(millisecond), L}.
+    {dht_utils:time_now(), L}.
 
 
 get_representant_bucket(Pred, Buckets) ->
