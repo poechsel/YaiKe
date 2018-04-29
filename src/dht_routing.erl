@@ -3,7 +3,7 @@
 
 -behavior(gen_server).
 
--export([update/1, find_k_nearest_self/1, find_k_nearest/2, debug/0, get_representant_bucket/0, get_representant_bucket/1]).
+-export([iter/1, update/1, find_k_nearest_self/1, find_k_nearest/2, debug/0, get_representant_bucket/0, get_representant_bucket/1]).
 
 -export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -20,6 +20,10 @@ init([K, Alpha, Uid]) ->
 
 debug() ->
     gen_server:call(?MODULE, debug).
+
+
+iter(Fun) ->
+    gen_server:cast(?MODULE, {iter, Fun}).
 
 % find the k nearest State from our curent node
 find_k_nearest_self(State) ->
@@ -51,6 +55,14 @@ find_k_nearest(State, I, M, Uid_Node, Acc) ->
     SBucket = lists:sort(Fun, Bucket),
     find_k_nearest(State, I+1, M, Uid_Node, lists:sublist(lists:merge(Fun, Acc, SBucket), M)).
 
+
+iter(_, _, I) when I >= 160 ->
+    1;
+
+iter(Fun, Array, I) ->
+    {_, A} = array:get(I, Array),
+    Fun(I, A),
+    iter(Fun, Array, I+1).
 
 
 
@@ -111,6 +123,10 @@ handle_call(debug, _From, State) ->
 
 handle_cast({update, {Uid_new_node, _}}, #routing{uid=Uid}=State) when Uid =:= Uid_new_node ->
     { noreply, State };
+
+handle_cast({iter, Fun}, State) ->
+    iter(Fun, State#routing.buckets, 0),
+    {noreply, State};
 
 handle_cast({update, {Uid_new_node, Ip} = Node}, State) ->
     io:format("[~p]: new connection ~p]~n", [node(), Ip]),

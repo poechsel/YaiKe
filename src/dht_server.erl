@@ -2,7 +2,7 @@
 -include("dht.hrl").
 -behaviour(gen_server).
 
--export([start_link/2, ping/1, debug/0, find_node/1, store/1, find_value/1]).
+-export([start_link/2, ping/1, debug/0, find_node/1, store/1, find_value/1, broadcast/0]).
 -export([init/1, handle_cast/2, handle_info/2, handle_call/3,
          terminate/2, code_change/3]).
 
@@ -25,6 +25,9 @@ ping(Other) ->
 
 debug() ->
     dht_routing:debug().
+
+broadcast() ->
+    gen_server:cast(?MODULE, {broadcast, "a", 0}).
 
 
 
@@ -206,7 +209,26 @@ handle_cast({ping, {_, Ip} = Node, _From}, State) ->
 handle_cast({pong, Node, _From}, State) ->
     dht_routing:update(Node),
     gen_server:reply(_From, ok),
-    { noreply, State }.
+    { noreply, State };
+
+handle_cast({broadcast, Msg, Height}, State) ->
+    NewState = handle_broadcast(Msg, State),
+    dht_routing:iter(fun (I, Bucket) ->
+                             case (I >= Height) and (length(Bucket) > 0) of 
+                                 true ->
+                                     {_, Ip} = lists:nth(rand:uniform(length(Bucket)), Bucket),
+                                     gen_server:cast({?MODULE, Ip}, {broadcast, Msg, I+1})
+                                     ;
+                                 _ -> 1
+                             end
+                     end
+                    ),
+    { noreply, NewState }
+.
+
+handle_broadcast(_, State) ->
+    io:format("Boradcast received on ~p~n", [node()]),
+    State.
 
 
 handle_info(refresh_table, State) ->
