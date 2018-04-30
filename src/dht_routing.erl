@@ -121,9 +121,6 @@ handle_call(debug, _From, State) ->
     io:format("BUCKETS ~p~n", [State#routing.buckets]),
     { reply, ok, State }.
 
-handle_cast({update, {Uid_new_node, _}}, #routing{uid=Uid}=State) when Uid =:= Uid_new_node ->
-    { noreply, State };
-
 handle_cast({iter, Fun}, State) ->
     iter(Fun, State#routing.buckets, 0),
     {noreply, State};

@@ -94,7 +94,7 @@ meta_lookup_loop(T, F, O, S, E, K, {_, Fun_loop, _} = Spe) ->
     Fun_loop((fun (Received) -> 
             meta_lookup_loop_act(Received, T, F, O, S, E, K, Spe) end)).
 
-meta_lookup_loop_act(Received, Target, _From, Old, Seen, Expected, K, {Fun_wrapper, _, _} = Spe) ->
+meta_lookup_loop_act(Received, Target, From, Old, Seen, Expected, K, {Fun_wrapper, _, _} = Spe) ->
     Me = self(),
     Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Target) =< (U2 bxor Target) end,
     Sorted = lists:sort(Fun, Received),
@@ -102,15 +102,15 @@ meta_lookup_loop_act(Received, Target, _From, Old, Seen, Expected, K, {Fun_wrapp
     Unvisited = lists:filter(fun (O) -> not(sets:is_element(O, Seen)) end, Current),
     case (Unvisited =:= []) of
         true ->
-            meta_lookup_loop(Target, _From, Current, Seen, Expected - 1, K, Spe);
+            meta_lookup_loop(Target, From, Current, Seen, Expected - 1, K, Spe);
         false ->
             [ Next | _ ] = Unvisited,
             spawn(fun () -> Fun_wrapper(Me, Next, Target, K) end),
             New_seen = sets:add_element(Next, Seen),
-            meta_lookup_loop(Target, _From, Current, New_seen, Expected, K, Spe)
+            meta_lookup_loop(Target, From, Current, New_seen, Expected, K, Spe)
     end.
 
-meta_lookup(Hash, _From, K, Alpha, {Fun_wrapper, _, _} = Specialization) ->
+meta_lookup(Hash, From, K, Alpha, {Fun_wrapper, _, _} = Specialization) ->
     Me = self(),
     Start = dht_routing:find_k_nearest(Hash, Alpha),
     Seen = sets:from_list(Start),
@@ -118,11 +118,11 @@ meta_lookup(Hash, _From, K, Alpha, {Fun_wrapper, _, _} = Specialization) ->
         spawn(fun () -> Fun_wrapper(Me, Node, Hash, K) end) end,
         Start
     ),
-    Nearest = meta_lookup_loop(Hash, _From, Start, Seen, length(Start), K, Specialization),
-    gen_server:reply(_From, Nearest).
+    Nearest = meta_lookup_loop(Hash, From, Start, Seen, length(Start), K, Specialization),
+    gen_server:reply(From, Nearest).
 
 
-lookup2_nodes(Hash, _From, K, Alpha) ->
+lookup_nodes(Hash, _From, K, Alpha) ->
     meta_lookup(Hash, _From, K, Alpha, {
         (fun(M,N,H,K_) -> lookup_nodes_wrapper(M,N,H,K_) end), 
         (fun (Continuation) ->
@@ -134,7 +134,7 @@ lookup2_nodes(Hash, _From, K, Alpha) ->
         (fun (O) -> O end)}).
 
 
-lookup2_value(Hash, _From, K, Alpha) ->
+lookup_value(Hash, _From, K, Alpha) ->
     meta_lookup(Hash, _From, K, Alpha, {
         (fun(M,N,H,K_) -> lookup_value_wrapper(M,N,H,K_) end), 
         (fun (Continuation) ->
@@ -178,11 +178,11 @@ handle_call(debug, _From, State) ->
 
 
 handle_call({lookup_value, Hash}, _From, State) ->
-    spawn(fun () -> lookup2_value(Hash, _From, State#state.k, State#state.alpha) end),
+    spawn(fun () -> lookup_value(Hash, _From, State#state.k, State#state.alpha) end),
     {noreply, State};
 
 handle_call({lookup_nodes, Hash}, _From, State) ->
-    spawn(fun () -> lookup2_nodes(Hash, _From, State#state.k, State#state.alpha) end),
+    spawn(fun () -> lookup_nodes(Hash, _From, State#state.k, State#state.alpha) end),
     {noreply, State}.
 
 
