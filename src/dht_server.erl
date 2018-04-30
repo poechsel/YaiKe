@@ -2,7 +2,7 @@
 -include("dht.hrl").
 -behaviour(gen_server).
 
--export([start_link/2, ping/1, debug/0, find_node/1, store/1, find_value/1, broadcast/0]).
+-export([start_link/2, ping/1, debug/0, find_node/1, find_node/2, store/1, find_value/1, broadcast/0, remove/1]).
 -export([init/1, handle_cast/2, handle_info/2, handle_call/3,
          terminate/2, code_change/3]).
 
@@ -50,6 +50,11 @@ find_node(Target) ->
     io:format("RESULT ~n~p~nENDRESULT~n", [R]),
     R.
 
+find_node(Target, Fun) ->
+    R = gen_server_call(?MODULE, {lookup_nodes, Fun, Target}, 10000),
+    io:format("RESULT ~n~p~nENDRESULT~n", [R]),
+    R.
+
 find_value(Hash) ->
     gen_server_call(?MODULE, {lookup_value, Hash}, 10000).
 
@@ -59,6 +64,15 @@ store(Value) ->
     lists:map(fun ({_, Ip}) -> gen_server:cast({?MODULE, Ip}, {store, {Hash, Value}}) end,
               Nodes),
     Hash.
+
+store_remove_util(Hash) ->
+    Nodes = find_node(Hash, (fun (K) -> 4 * K end)),
+    lists:map(fun ({_, Ip}) -> gen_server:cast({?MODULE, Ip}, {store_remove, Hash}) end, Nodes).
+
+remove(Hash) ->
+    gen_server:cast(?MODULE, {remove, Hash}).
+    
+
 
 request_k_nearest_wrapper(K, {_, Owner_ip} = Owner, Target) ->
     case gen_server_call({?MODULE, Owner_ip}, {request_k_nearest, K, Owner, Target}, 1000) of
@@ -72,7 +86,6 @@ request_k_nearest_wrapper(K, {_, Owner_ip} = Owner, Target) ->
 
 
 lookup_nodes_wrapper(Owner_pid, Owner, Target, K) ->
-    io:format("called~n"),
     Out = request_k_nearest_wrapper(K, Owner, Target),
     Owner_pid ! Out.
 
@@ -183,12 +196,25 @@ handle_call({lookup_value, Hash}, _From, State) ->
 
 handle_call({lookup_nodes, Hash}, _From, State) ->
     spawn(fun () -> lookup_nodes(Hash, _From, State#state.k, State#state.alpha) end),
-    {noreply, State}.
+    {noreply, State};
 
+handle_call({lookup_nodes, Fun, Hash}, _From, State) ->
+    spawn(fun () -> lookup_nodes(Hash, _From, Fun(State#state.k), State#state.alpha) end),
+    {noreply, State}.
 
 handle_cast({store, {Hash, Value}}, State) ->
     Store = maps:put(Hash, Value, State#state.store),
     { noreply, State#state{store=Store} };
+
+handle_cast({remove, Hash}, State) ->
+    timer:send_after(erlang:convert_time_unit(60*60, second, millisecond), {store_remove_call, Hash}),
+    timer:send_after(erlang:convert_time_unit(60*60 + 30 * 60, second, millisecond), {store_remove_call, Hash}),
+    spawn(fun () -> store_remove_util(Hash) end),
+    { noreply, State };
+
+handle_cast({store_remove, Hash}, State) ->
+    Store = maps:remove(Hash, State#state.store),
+    { noreply, State#state{store=Store }};
 
 
 handle_cast({ping, {_, Ip} = Node, _From}, State) ->
@@ -239,11 +265,16 @@ handle_info(refresh_table, State) ->
                       fun (Time) -> (CTime - Time) < OffsetTime end),
     lists:foreach(
       fun ({H, Ip}) ->
-              io:format("[~p]: refreshing: ~p ~p~n", [node(), H, Ip]),
+              %io:format("[~p]: refreshing: ~p ~p~n", [node(), H, Ip]),
               spawn(fun () -> gen_server_call(?MODULE, {lookup_nodes, H}, 10000) end)
       end,
                   Representants),
     { noreply, State };
+
+handle_info({store_remove_call, Hash}, State) ->
+    io:format("removing~n"),
+    spawn(fun() -> store_remove_util(Hash) end),
+    {noreply, State};
 
 handle_info(Msg, State) ->
     io:format("Unexpected message: ~p~n",[Msg]),

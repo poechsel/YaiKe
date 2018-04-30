@@ -126,7 +126,7 @@ handle_cast({iter, Fun}, State) ->
     {noreply, State};
 
 handle_cast({update, {Uid_new_node, Ip} = Node}, State) ->
-    io:format("[~p]: new connection ~p]~n", [node(), Ip]),
+    %io:format("[~p]: new connection ~p]~n", [node(), Ip]),
     D = dht_utils:distance(State#routing.uid, Uid_new_node),
     I = find_power_two(D),
     New_bucket = update_bucket(State, array:get(I, State#routing.buckets), Node),
