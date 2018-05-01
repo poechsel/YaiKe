@@ -1,6 +1,6 @@
 -module(client).
 
--export([spawn_agent/1, get_archive/1, hello/0, send_code/1, uncompress_and_load/1]).
+-export([spawn_agent/1, get_archive/1, hello/0, send_code/1, uncompress_and_load/1, store/2]).
 -behaviour(gen_server).
 -export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2]).
 
@@ -17,6 +17,9 @@ get_archive(Folder) ->
 
 hello() ->
     io:format("hello~n").
+
+store(Node, Value) ->
+    gen_server:call(?MODULE, {store, Node, Value}).
 
 send_code(Node) ->
     { Mod, Bin, File } = code:get_object_code(client),
@@ -48,6 +51,11 @@ handle_call({spawn_agent, Node}, _From, State) ->
         pang -> 
             {reply, unreachable, State}
     end;
+
+handle_call({store, Node, Value}, _From, State) ->
+    rpc:call(Node, erlang, apply, [
+                                  dht:store(Value), []
+                                  ]);
 
 handle_call(X, _From, State) ->
     io:format("CALL: ~p~n", [X]),

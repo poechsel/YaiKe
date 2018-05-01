@@ -3,7 +3,7 @@
 
 -behavior(gen_server).
 
--export([iter/1, update/1, find_k_nearest_self/1, find_k_nearest/2, debug/0, get_representant_bucket/0, get_representant_bucket/1]).
+-export([iter/1, update/1, find_k_nearest_self/1, find_k_nearest/2, stats/0, get_representant_bucket/0, get_representant_bucket/1]).
 
 -export([start_link/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -18,8 +18,8 @@ init([K, Alpha, Uid]) ->
     {ok, #routing{k=K, alpha=Alpha, uid=Uid}}.
 
 
-debug() ->
-    gen_server:call(?MODULE, debug).
+stats() ->
+    gen_server:call(?MODULE, stats).
 
 
 iter(Fun) ->
@@ -117,7 +117,7 @@ handle_call({find_k_nearest, Node, N}, _From, State) ->
     Nodes = find_k_nearest(State, 0, Node, N, []),
     { reply, Nodes, State };
 
-handle_call(debug, _From, State) ->
+handle_call(stats, _From, State) ->
     io:format("BUCKETS ~p~n", [State#routing.buckets]),
     { reply, ok, State }.
 

@@ -1,8 +1,7 @@
 -module(dht).
 -behaviour(application).
 
--export([start/2, stop/1, ping/1, debug/0, find_node/1, store/1, find_value/1]).
- 
+-export([start/2, stop/1, stats/0, store/1, pull/1, broadcast/1, scatter/1, remove/1, connect/1, stop/0]).
 start(normal, _Args) ->
     K = get_default(k, 20),
     Alpha = get_default(alpha, 1),
@@ -12,20 +11,29 @@ stop(_State) ->
     ok.
 
 
-find_node(Target) ->
-    dht_server:find_node(Target).
-
-find_value(Hash) ->
-    dht_server:find_value(Hash).
-
 store(Value) ->
     dht_server:store(Value).
 
-ping(Other) ->
-    dht_server:ping(Other).
+pull(Hash) ->
+    dht_server:pull(Hash).
 
-debug() ->
-    dht_server:debug().
+broadcast(Msg) ->
+    dht_server:broadcast(Msg).
+
+scatter(MsgList) ->
+    dht_server:scatter(MsgList).
+
+connect(Node) ->
+    dht_server:connect(Node).
+
+remove(Hash) ->
+    dht_server:remove(Hash).
+
+stats() ->
+    dht_server:stats().
+
+stop() ->
+    application:stop(?MODULE).
 
 
 
