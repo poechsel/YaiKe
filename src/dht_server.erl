@@ -42,8 +42,8 @@ connect(Other) ->
 
 %% @doc get statistics from this node
 stats() ->
-    gen_server:call(?MODULE, stats),
-    dht_routing:stats().
+    RT = gen_server:call(?MODULE, stats),
+    {dht_routing:stats(), RT}.
 
 
 %% @doc broadcast a message
@@ -286,7 +286,7 @@ handle_call({store_contains, Node, Hash}, _From, State) ->
 
 %% @doc request for a list of statistics
 handle_call(stats, _From, State) ->
-    { reply, 1, State };
+    { reply, maps:size(State#state.store), State };
 
 
 %% @doc request for a lookup of the value having hash 'Hash'

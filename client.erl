@@ -2,7 +2,7 @@
 
 -export([spawn_agent/1, get_archive/1, send_code/1, uncompress_and_load/1, store/2, pull/2, remove/2, kill/1]).
 -behaviour(gen_server).
--export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2, connect/2]).
+-export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2, connect/2, stats/0]).
 
 
 
@@ -22,6 +22,9 @@ call_dht_function(Node, Fun, Args) ->
         R -> R
     end.
 
+
+stats() ->
+    gen_server:call(?MODULE, stats).
 
 connect(Node, Other) ->
     call_dht_function(Node, connect, [Other]).
@@ -79,6 +82,22 @@ handle_call({kill, Node}, _From, State) ->
         _ -> { reply, nonodes, NS }
     end;
 
+handle_call(stats, _From, State) ->
+    L = sets:to_list(State),
+    io:format("The dht has ~p nodes~n", [length(L)]),
+    L2 = lists:map(fun (Node) -> call_dht_function(Node, stats, []) end, L),
+    {NNodesavg, Lupdmin, Nemptavg, NStoredavg} = 
+    lists:foldl(
+           fun ({{NNodes, Lupd, Nempt}, NStored}, {A, B, C, D}) ->
+                   {A+NNodes, min(Lupd, B), Nempt + C, NStored + D}
+           end,
+           {0, os:timestamp(), 0, 0},
+           L2),
+    io:format("   Each nodes store on average ~p values~n", [NStoredavg / length(L)]),
+    io:format("   Each nodes knows of ~p other nodes on average~n", [NNodesavg / length(L)]),
+    io:format("   Each routing tables has ~p non empty buckets (average)~n", [Nemptavg / length(L)]),
+    io:format("   The time we updated the last routing bucket is ~p~n", [Lupdmin]),
+    {reply, done, State};
 
 handle_call(X, _From, State) ->
     io:format("CALL: ~p~n", [X]),

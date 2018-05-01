@@ -118,8 +118,17 @@ handle_call({find_k_nearest, Node, N}, _From, State) ->
     { reply, Nodes, State };
 
 handle_call(stats, _From, State) ->
-    io:format("BUCKETS ~p~n", [State#routing.buckets]),
-    { reply, ok, State }.
+    N = array:foldl(fun (_, {_, Bucket}, Acc) -> Acc + length(Bucket) end, 0, State#routing.buckets),
+    {Tc, Tn} = array:foldl(
+          fun (_, {Time, _}, {Pt, Pn}) -> 
+                  case Time of
+                      -1 -> {Pt, Pn};
+                      A -> {min(A, Pt), Pn + 1}
+                  end
+          end,
+          {dht_utils:time_now(), 0}, State#routing.buckets),
+    TCc = {Tc div (1000000 * 1000), (Tc div 1000) rem 1000000, 0},
+    { reply, {N, calendar:now_to_local_time(TCc), Tn}, State }.
 
 handle_cast({iter, Fun}, State) ->
     iter(Fun, State#routing.buckets, 0),
