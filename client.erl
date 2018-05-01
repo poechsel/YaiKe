@@ -1,8 +1,8 @@
 -module(client).
 
--export([spawn_agent/1, get_archive/1, hello/0, send_code/1, uncompress_and_load/1, store/2]).
+-export([spawn_agent/1, get_archive/1, send_code/1, uncompress_and_load/1, store/2, pull/2, remove/2, kill/1]).
 -behaviour(gen_server).
--export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2]).
+-export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2, connect/2]).
 
 
 
@@ -15,11 +15,28 @@ get_archive(Folder) ->
     {ok, {_, Stream}} = zip:create("kamdelia.zip", Files, [memory]),
     Stream.
 
-hello() ->
-    io:format("hello~n").
+call_dht_function(Node, Fun, Args) ->
+    case (rpc:call(Node, dht, Fun, Args)) of
+        { badrpc, _ } ->
+            io:format("No agent launched on node ~p~n", [Node]);
+        R -> R
+    end.
+
+
+connect(Node, Other) ->
+    call_dht_function(Node, connect, [Other]).
 
 store(Node, Value) ->
-    gen_server:call(?MODULE, {store, Node, Value}).
+    call_dht_function(Node, store, [Value]).
+
+pull(Node, Hash) ->
+    call_dht_function(Node, pull, [Hash]).
+
+remove(Node, Hash) ->
+    call_dht_function(Node, remove, [Hash]).
+
+kill(Node) ->
+    gen_server:call(?MODULE, {kill, Node}).
 
 send_code(Node) ->
     { Mod, Bin, File } = code:get_object_code(client),
@@ -34,6 +51,7 @@ uncompress_and_load(Stream) ->
     application:start(dht).
 
 spawn_agent(Node) ->
+    io:format("hat's me, mario!~n"),
     gen_server:call(?MODULE, {spawn_agent, Node}).
 
 
@@ -43,6 +61,7 @@ init(_) ->
 handle_call({spawn_agent, Node}, _From, State) ->
     case net_adm:ping(Node) of
         pong -> 
+            io:format("coucou~n"),
             erlang:monitor_node(Node, true),
             send_code(Node),
             Stream = get_archive("ebin/"),
@@ -52,10 +71,14 @@ handle_call({spawn_agent, Node}, _From, State) ->
             {reply, unreachable, State}
     end;
 
-handle_call({store, Node, Value}, _From, State) ->
-    rpc:call(Node, erlang, apply, [
-                                  dht:store(Value), []
-                                  ]);
+handle_call({kill, Node}, _From, State) ->
+    call_dht_function(Node, stop, []),
+    NS = sets:del_element(Node, State),
+    case sets:to_list(NS) of
+        [ X | _ ] -> { reply, X, NS };
+        _ -> { reply, nonodes, NS }
+    end;
+
 
 handle_call(X, _From, State) ->
     io:format("CALL: ~p~n", [X]),
