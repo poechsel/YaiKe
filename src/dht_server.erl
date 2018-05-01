@@ -261,7 +261,13 @@ handle_cast({broadcast, Ref, Msg, Height}, State) ->
     { noreply, NewState#state{queries=maps:put(Ref, dht_utils:time_now(), NewState#state.queries)} }
 .
 
-handle_broadcast(_, State) ->
+handle_broadcast({scatter, MessageList}, State) ->
+    Msg = lists:nth(rand:uniform(length(MessageList)), MessageList), 
+    io:format("[~p] SCATTER: received ~p~n", [node(), Msg]),
+    State;
+
+handle_broadcast(Msg, State) ->
+    io:format("[~p] BROADCAST: received ~p~n", [node(), Msg]),
     State.
 
 

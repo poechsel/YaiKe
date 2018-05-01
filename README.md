@@ -1,2 +1,3 @@
-# Kademlia
-Yet another implementation of Kademlia in Erlang
+# YaiKe
+
+et another implementation of Kademlia in Erlang
