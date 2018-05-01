@@ -43,17 +43,17 @@ find_k_nearest_self(State, I, N, Acc) ->
 
 
 % find the m nearest State from a given node
-find_k_nearest(M, Node) ->
-    gen_server:call(?MODULE, {find_k_nearest, M, Node}).
+find_k_nearest(Node, N) ->
+    gen_server:call(?MODULE, {find_k_nearest, Node, N}).
 
-find_k_nearest(_State, I, _M, _Node, Acc) when I >= 160 ->
+find_k_nearest(_State, I, _, _, Acc) when I >= 160 ->
     Acc;
 
-find_k_nearest(State, I, M, Uid_Node, Acc) ->
+find_k_nearest(State, I, Uid_Node, N, Acc) ->
     {_, Bucket} = array:get(I, State#routing.buckets),
     Fun = fun ({U1, _}, {U2, _}) -> (U1 bxor Uid_Node) =< (U2 bxor Uid_Node) end,
     SBucket = lists:sort(Fun, Bucket),
-    find_k_nearest(State, I+1, M, Uid_Node, lists:sublist(lists:merge(Fun, Acc, SBucket), M)).
+    find_k_nearest(State, I+1, Uid_Node, N, lists:sublist(lists:merge(Fun, Acc, SBucket), N)).
 
 
 iter(_, _, I) when I >= 160 ->
@@ -113,9 +113,9 @@ handle_call({get_representant_bucket, Pred}, _From, State) ->
     { reply, R, State};
 
 
-handle_call({find_k_nearest, M, Node}, _From, State) ->
-    N = find_k_nearest(State, 0, M, Node, []),
-    { reply, N, State };
+handle_call({find_k_nearest, Node, N}, _From, State) ->
+    Nodes = find_k_nearest(State, 0, Node, N, []),
+    { reply, Nodes, State };
 
 handle_call(debug, _From, State) ->
     io:format("BUCKETS ~p~n", [State#routing.buckets]),
@@ -125,7 +125,7 @@ handle_cast({iter, Fun}, State) ->
     iter(Fun, State#routing.buckets, 0),
     {noreply, State};
 
-handle_cast({update, {Uid_new_node, Ip} = Node}, State) ->
+handle_cast({update, {Uid_new_node, _} = Node}, State) ->
     %io:format("[~p]: new connection ~p]~n", [node(), Ip]),
     D = dht_utils:distance(State#routing.uid, Uid_new_node),
     I = find_power_two(D),

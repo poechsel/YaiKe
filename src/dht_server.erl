@@ -2,13 +2,14 @@
 -include("dht.hrl").
 -behaviour(gen_server).
 
--export([start_link/2, ping/1, debug/0, find_node/1, find_node/2, store/1, find_value/1, broadcast/0, remove/1]).
+-export([start_link/2, ping/1, debug/0, find_node/1, find_node/2, store/1, find_value/1, broadcast/1, remove/1, connect/1]).
 -export([init/1, handle_cast/2, handle_info/2, handle_call/3,
          terminate/2, code_change/3]).
 
 %%% Client API
 start_link(K, Alpha) ->
     dht_routing_sup:start_link([K, Alpha, dht_utils:hash(node())]),
+    dht_routing:update({dht_utils:hash(node()), node()}),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
 ping({_, Other}) ->
@@ -19,12 +20,16 @@ ping(Other) ->
     X = ping({Uid, Other}),
     X.
 
+
+connect(Other) ->
+    gen_server:cast(?MODULE, {connect, Other}).
+
 debug() ->
     gen_server:call(?MODULE, debug),
     dht_routing:debug().
 
-broadcast() ->
-    gen_server:cast(?MODULE, {broadcast, make_ref(), "a", 0}).
+broadcast(Msg) ->
+    gen_server:cast(?MODULE, {broadcast, make_ref(), Msg, 0}).
 
 
 
@@ -41,13 +46,24 @@ gen_server_call(A, B, C) ->
     end.
 
 
+is_not_error({error, _}) ->
+    false;
+is_not_error(_) ->
+    true.
+
 find_node(Target) ->
     R = gen_server_call(?MODULE, {lookup_nodes, Target}, 10000),
-    R.
+    case R of 
+        { error, _ } -> [];
+        L -> lists:filter(fun (X) -> is_not_error(X) end, L)
+    end.
 
 find_node(Target, Fun) ->
     R = gen_server_call(?MODULE, {lookup_nodes, Fun, Target}, 10000),
-    R.
+    case R of 
+        { error, _ } -> [];
+        L -> lists:filter(fun (X) -> is_not_error(X) end, L)
+    end.
 
 find_value(Hash) ->
     gen_server_call(?MODULE, {lookup_value, Hash}, 10000).
@@ -120,6 +136,7 @@ meta_lookup_loop_act(Received, Target, From, Old, Seen, Expected, K, {Fun_wrappe
 meta_lookup(Hash, From, K, Alpha, {Fun_wrapper, _, _} = Specialization) ->
     Me = self(),
     Start = dht_routing:find_k_nearest(Hash, Alpha),
+    io:format("first huess: ~p~n", [Start]),
     Seen = sets:from_list(Start),
     lists:map(fun (Node) ->
         spawn(fun () -> Fun_wrapper(Me, Node, Hash, K) end) end,
@@ -233,6 +250,21 @@ handle_cast({pong, Node, _From}, State) ->
     gen_server:reply(_From, ok),
     { noreply, State };
 
+
+handle_cast({connect, Other}, State) ->
+    spawn(fun () ->
+                  dht_server:ping(Other),
+                  dht_server:find_node(State#state.uid),
+
+                  R = dht_routing:get_representant_bucket(fun (_) -> true end),
+                  lists:foreach(
+                    fun ({H, _}) ->
+                            spawn(fun () -> dht_server:find_node(H) end)
+                    end,
+                    R)
+          end),
+    { noreply, State };
+
 handle_cast({broadcast, Ref, Msg, Height}, State) ->
     OffsetTime = erlang:convert_time_unit(60*60, second, millisecond),
     CTime = dht_utils:time_now(),
@@ -278,7 +310,7 @@ handle_info(refresh_table, State) ->
                       fun (Time) -> (CTime - Time) < OffsetTime end),
     lists:foreach(
       fun ({H, _}) ->
-              spawn(fun () -> gen_server_call(?MODULE, {lookup_nodes, H}, 10000) end)
+              spawn(fun () -> dht_server:find_node(H) end)
       end,
       Representants),
     { noreply, State };
