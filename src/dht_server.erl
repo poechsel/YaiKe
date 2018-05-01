@@ -8,8 +8,6 @@
 
 %%% Client API
 start_link(K, Alpha) ->
-    io:format("~p ~p~n", [K, Alpha]),
-    io:format("uid: ~p~n", [dht_utils:hash(node())]),
     dht_routing_sup:start_link([K, Alpha, dht_utils:hash(node())]),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [K, Alpha], []).
 
@@ -17,10 +15,8 @@ ping({_, Other}) ->
     gen_server_call(?MODULE, {request_ping, Other}, 1000);
 
 ping(Other) ->
-    io:format("Starting ping~n"),
     Uid = dht_utils:hash(Other),
     X = ping({Uid, Other}),
-    io:format("Stopping ping~n"),
     X.
 
 debug() ->
@@ -47,12 +43,10 @@ gen_server_call(A, B, C) ->
 
 find_node(Target) ->
     R = gen_server_call(?MODULE, {lookup_nodes, Target}, 10000),
-    io:format("RESULT ~n~p~nENDRESULT~n", [R]),
     R.
 
 find_node(Target, Fun) ->
     R = gen_server_call(?MODULE, {lookup_nodes, Fun, Target}, 10000),
-    io:format("RESULT ~n~p~nENDRESULT~n", [R]),
     R.
 
 find_value(Hash) ->
@@ -159,8 +153,22 @@ lookup_value(Hash, _From, K, Alpha) ->
         ),
         (fun (_) -> { notfound } end)}).
 
+
+store_refresh(Self, Hash, Value) ->
+    Nodes = find_node(Hash),
+    lists:map(fun ({_, Ip}) -> gen_server:cast({?MODULE, Ip}, {store, {Hash, Value}}) end,
+              Nodes),
+    case lists:member(Self, Nodes) of
+        false ->
+            gen_server:cast(?MODULE, {store_remove, Hash});
+        true ->
+            1
+    end.
+
+
 %%% Server functions
 init([K, Alpha]) -> 
+    timer:send_after(erlang:convert_time_unit(10, second, millisecond), store_refresh_init),
     timer:send_interval(erlang:convert_time_unit(10, second, millisecond), refresh_table),
     {ok, #state{k=K, alpha=Alpha, uid = dht_utils:hash(node())}}.
 
@@ -170,7 +178,6 @@ handle_call({request_ping, Other}, _From, State) ->
     { noreply, State };
 
 handle_call({request_k_nearest, K, Node, Target}, _From, State) ->
-    io:format("k nearest from [~p] ~n", [_From]),
     dht_routing:update(Node),
     Nearest = dht_routing:find_k_nearest(Target, K),
     { reply, Nearest, State };
@@ -180,13 +187,12 @@ handle_call({store_contains, Node, Hash}, _From, State) ->
     Out = case maps:find(Hash, State#state.store) of
               error ->
                   { notfound };
-              { ok, Value } ->
+              { ok, {_, Value} } ->
                   { found, Value }
           end,
     { reply, Out, State };
 
 handle_call(debug, _From, State) ->
-    io:format("STORE ~p~n", [State#state.store]),
     { reply, 1, State };
 
 
@@ -203,7 +209,7 @@ handle_call({lookup_nodes, Fun, Hash}, _From, State) ->
     {noreply, State}.
 
 handle_cast({store, {Hash, Value}}, State) ->
-    Store = maps:put(Hash, Value, State#state.store),
+    Store = maps:put(Hash, { dht_utils:time_now(), Value}, State#state.store),
     { noreply, State#state{store=Store} };
 
 handle_cast({remove, Hash}, State) ->
@@ -234,27 +240,28 @@ handle_cast({broadcast, Ref, Msg, Height}, State) ->
                fun (_, Time) -> (CTime - Time) < OffsetTime end,
                State#state.queries),
     FState = State#state{queries=FQueries},
-    NewState = case (maps:find(Ref, FState#state.queries)) of
-                   error ->
-                       NS = handle_broadcast(Msg, FState),
-                       dht_routing:iter(fun (I, Bucket) ->
-                                                case (I >= Height) and (length(Bucket) > 0) of 
-                                                    true ->
-                                                        {_, Ip} = lists:nth(rand:uniform(length(Bucket)), Bucket),
-                                                        gen_server:cast({?MODULE, Ip}, {broadcast, Ref, Msg, I+1})
-                                                        ;
-                                                    _ -> 1
-                                                end
-                                        end
-                                       ),
-                       NS;
-                   { ok, _ } -> FState
-               end,
+    NewState = 
+    case (maps:find(Ref, FState#state.queries)) of
+        error ->
+            NS = handle_broadcast(Msg, FState),
+            dht_routing:iter(
+              fun (I, Bucket) ->
+                      case (I >= Height) and (length(Bucket) > 0) of 
+                          true ->
+                              {_, Ip} = lists:nth(rand:uniform(length(Bucket)), Bucket),
+                              gen_server:cast({?MODULE, Ip}, {broadcast, Ref, Msg, I+1})
+                              ;
+                          _ -> 1
+                      end
+              end
+             ),
+            NS;
+        { ok, _ } -> FState
+    end,
     { noreply, NewState#state{queries=maps:put(Ref, dht_utils:time_now(), NewState#state.queries)} }
 .
 
 handle_broadcast(_, State) ->
-    io:format("Broadcast received on ~p~n", [node()]),
     State.
 
 
@@ -264,27 +271,40 @@ handle_info(refresh_table, State) ->
     Representants = dht_routing:get_representant_bucket(
                       fun (Time) -> (CTime - Time) < OffsetTime end),
     lists:foreach(
-      fun ({H, Ip}) ->
-              %io:format("[~p]: refreshing: ~p ~p~n", [node(), H, Ip]),
+      fun ({H, _}) ->
               spawn(fun () -> gen_server_call(?MODULE, {lookup_nodes, H}, 10000) end)
       end,
-                  Representants),
+      Representants),
     { noreply, State };
 
 handle_info({store_remove_call, Hash}, State) ->
-    io:format("removing~n"),
     spawn(fun() -> store_remove_util(Hash) end),
     {noreply, State};
 
+handle_info(store_refresh, State) ->
+    CTime = dht_utils:time_now(),
+    OffsetTime = erlang:convert_time_unit(50, second, millisecond),
+    L = maps:to_list(State#state.store),
+    Lf = lists:filter(fun ({_, {Time, _}}) -> (CTime - Time) < OffsetTime end, L),
+    lists:foreach(
+      fun ({H, {_, V}}) -> spawn(fun () -> store_refresh({State#state.uid, node()}, H, V) end) end,
+      Lf),
+    { noreply, State };
+
+handle_info(store_refresh_init, State) ->
+    io:format("coucou~n"),
+    timer:send_interval(erlang:convert_time_unit(10, second, millisecond), store_refresh),
+    {noreply, State};
+
+
 handle_info(Msg, State) ->
-    io:format("Unexpected message: ~p~n",[Msg]),
+    io:format("unexpected message [~p]~n", [Msg]),
     {noreply, State}.
 
 terminate(normal, _State) ->
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
-    io:format("code updated~n"),
     %% No change planned. The function is there for the behaviour,
     %% but will not be used. Only a version on the next
     {ok, State}. 
