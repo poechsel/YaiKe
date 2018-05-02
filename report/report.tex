@@ -15,6 +15,7 @@
 \usepackage[colorinlistoftodos]{todonotes}
 \usepackage[colorlinks=true, allcolors=blue]{hyperref}
 \usepackage{minted}
+\usepackage{lmodern}
 
 \usepackage{tikz}
 \usetikzlibrary{arrows,positioning,fit,shapes,calc}
@@ -208,6 +209,74 @@ Finally after discussing with other people and doing a bit more of research I ch
     \item Its simplicity was intriguing me
 \end{itemize}
 
+\subsection{Short description of Kademlia}
+
+I strongly encourage you to read the original paper which is very well written. I'll write below a small overview of Kademlia, which given the hour at which I'm writting this part might be fuzzy and inexact.
+
+Kademlia is focused around the \textit{xor distance}. Each node in the topology is associated to a unique 160-bits integer, called its id (here this integer is determined using a sha function). Two nodes of id $a$ and $b$ have a distance equal to $a \text{ xor } b$. This xor distance allows us to create easily a tree topology.
+A Kademlia network is also associated to two parameters:
+\begin{itemize}
+    \item $K$: this is a number inversely proportional to the number of crashes we can expect in one hour. Here it is set to $20$.
+    \item $\alpha$: the degree of parallelism for asynchronous communications, meaning we can have at most $\alpha$ communications at the same time.
+\end{itemize}
+
+One other key point is that to each node is associated a routing table. The routing table is divided in $160$ buckets. The bucket $i$ can contain at most $K$ nodes having an id $a$ with a xor distance to the current node (of id $id$) in the range $[2^{i-1}; 2^{i}]$ (so $a \text{ xor } b \in [2^{i-1}; 2^{i}]$). We say that our current node knows of an other node if this other node is present inside its routing table. Beware, the relation is not symmetric! When a node $a$ makes a communication with an other node $b$ (a ping, a node lookup / value lookup...), we try to had $a$ to the routing table of $b$. A node is added to the routing table if either a slot is disponible in the bucket or we can eject a non responsive node from this bucket. 
+
+Kademlia is defined around three basic operations:
+\begin{itemize}
+    \item Ping: a node $a$ can ping a node $b$ in order to try to add $b$ to its routing table or to know if $b$ is alive
+    \item Node find: a node $a$ can try to find the $K$ nearest node from a hash $h$ by iterating from node to node. The process to find the $K$ nearest node is done iteratively: First take, the $\alpha$ nearest node in our routing table. Then, for each entry of this list, ask the corresponding node for its $K$ nearest node in its routing table, merge it with our current list and keep the nearest $K$  node. We obtain a list of node $l'$. For each node in $l'$ we haven't already seen, get the $K$ nearest node in its routing table, merge and crop. Repeat until a fixpoint is achieve.
+    \item value find: this is the same as a node find but we stop the exploration when a node contain a value.
+\end{itemize}
+
+From this basic operations, we can define more complex operations:
+\begin{itemize}
+    \item Storing a value: To store a value $v$, first compute the hash $h$ of $v$. Then, use a node find to get the $K$ nodes whose id are the nearest to $h$. Store $v$ in these $K$ nodes
+    \item Retrieving a value: Use a value find operation (which is just an optimized node find as we stop the exploration as soon as we can)
+    \item Connecting to an other node. A node $a$ can connect to a node $b$ by first pinging $b$, then asking for a node find of $id_a$.
+\end{itemize}
+
+
+We also have two other mechanism of refreshments. Firstly, every hour we take one representant per non updated in the last hours buckets and send a node find to them. This allow us to keep a up to date routing table aware of the newest change of topology. 
+Secondly, we also refreshes stored values every hours by "republishing" them to the $K$ nearest nodes. This allows us to compensate for the connection and crash of nodes.
+
+
+Finally, Kademlia is building a sort of tree topology with its routing table. The topology is always updating with each communications. Theorical performances is expected to be in the order of $O(log n)$ communications. We can also note that if we have few nodes (less than $160*k$, we can have a fully connected topology: every bucket could be filled, thus the routing table could contain $k*160$ nodes.
+
+\subsection{Description of the questions done and approaches}
+
+\subsubsection{Part 1}
+
+\paragraph{Question 1:} Every questions was treated. However, for question 1)e we have a small nuance. Kademlia doesn't detect when a node crash. This could be done easily with monitors in erlang, but kademlia doesn't need to know that a node is dying: the routing table will be filled with connections to other nodes thanks to anterior communications and the mechanisms of republishing.
+
+\paragraph{Question 2:} 
+Broadcasting, scattering and leader election are quite absurd in kademlia. The goal of kademlia is to be able to scale, thus to avoir operations involving every nodes. Every operations aims to involve as few nodes as it can. Nevertheless, I've implemented a broadcast algorithm following \cite{czirkos2013solution}. I didn't really understood what was supposed to do scattering. Therefore, I've implemented it as a broadcast of every messages. Each node will be attributed a message taken uniformly randomly along the message lists: sharing informations on who picked which message would be too costly. We can hope that the messages are uniformly distributed among the nodes.
+
+I haven't implemented a leader election algorithm. I tried, but as each node has a different view of the topology, and as a node $a$ can "know" of a node $b$ but the node $b$ can not know about the node $a$, the task isn't easy. My main lead was to adapt an algorithm of leader election for directed graphs described in \cite{tel2000introduction} (for exemple the one allowing us to convert a traversal algorithm to a leader election algorithm). However, the task was too complex for the time I had.
+
+
+\subsubsection{Part 2}
+
+UUID are computed as a 160-bit hash with sha. For now, we can only stored string, but I'm describing below a hypothetical way to share files. Sha1 algorithm aims to implement a hash function from cryptographic algorithm. Thus, we can hope that every hash can appear uniformly (ie for two values $a$ and $b$, we can't distinguish them from their hash values).
+
+Every value is duplicated on $K$ nodes.
+
+Question c) is not deterministic. If we are shutting down too much nodes at once, then the mechanism of key republishing could be too slow to happen. A solution will be to increase $K$. In normal use, no problem should occur with $K=20$ (see the original paper for more informations).
+
+Question d) wasn't so easy. It is easy to release a data using a broadcast, but I didn't wanted to use it as it is against the "spirit" of Kademlia. An other idea would be to find the $K$ nearest nodes to the value and to delete the value from them. However, if a node near the value connected, this would not work as expected. Thus, I chose to remove the value from the $4K$ nearest nodes to it, and then to repeat the mechanism of removal 1 hour and 1 hour and a half after. In this time window value republishing is likely to have happened.
+
+Question e) comes from properties of hash function (non distinguishability). In other words, if we expect the hash function to be "good", each node have the same chance to store a key. Thus, keys should be uniformly spread.
+
+Question f) is directly in Kademlia. We are publishing values only on $K$ nodes. If new nodes connects, we could temporarly have more than $K$ nodes with the same key. However, the mechanism of key republishing will automatically remove the keys from nodes that became "far" regularly, which avoid us to flood the network.
+
+\subsection{Part 3}
+
+Nothing special to be said here, everything was done.
+
+
+
+
+
 \section{Choice of implementations}
 
 \subsection{OTP}
@@ -254,7 +323,7 @@ Although I didn't implemented it, I propose the following approach to store huge
         Let $h$ be the hash of the file we want to retrieve. Here is the pseudocode of the algorithm to download the file.
 
 \begin{algorithm}
-    \caption{Download of a chunked file}\label{euclid}
+    \caption{Download of a chuncked file}\label{euclid}
 \begin{algorithmic}[1]
 \Procedure{Download}{h: hash}
 \State $m \gets \text{value stored for hash } h$
