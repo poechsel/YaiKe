@@ -55,7 +55,20 @@ You're free to use the following commands in order to interact with the network:
 - client:scatter(MsgList) -> Scatter `MsgList` on all nodes
 - client:spawn_agent(Node) -> Spawn a kademlia agent remotely on node `Node`
 
+Example of session:
 
+```
+>> client:deploy("nodes.txt").
+>> client:store("bonjour").
+>> client:pull(468002421904888468730554770695485051528995388970).
+{found, "bonjour"}
+>> client:stop('foo@ponce.localdomain').
+>> client:pull(468002421904888468730554770695485051528995388970).
+{found, "bonjour"}
+>> client:remove(468002421904888468730554770695485051528995388970).
+>> client:pull(468002421904888468730554770695485051528995388970).
+{notfound}
+```
 
 
 
