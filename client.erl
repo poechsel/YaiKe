@@ -1,6 +1,6 @@
 -module(client).
 
--export([spawn_agent/1, get_archive/1, send_code/1, uncompress_and_load/1, store/2, pull/2, remove/2, kill/1, deploy/1, deploy_from_file/1]).
+-export([spawn_agent/1, get_archive/1, send_code/1, uncompress_and_load/1, store/1, pull/1, remove/1, broadcast/1, scatter/1, stop/1, deploy/1, deploy_from_file/1]).
 -behaviour(gen_server).
 -export([handle_call/3, handle_cast/2, start_link/0, init/1, handle_info/2, connect/2, stats/0]).
 
@@ -21,6 +21,9 @@ call_dht_function(Node, Fun, Args) ->
             io:format("No agent launched on node ~p~n", [Node]);
         R -> R
     end.
+
+call_dht_function(Fun, Args) ->
+    gen_server:call(?MODULE, {call, Fun, Args}).
 
 
 deploy(NodeList) ->
@@ -44,17 +47,23 @@ connect(Node, Other) ->
     io:format("Adding node ~p to the topology of ~p~n", [Other, Node]),
     call_dht_function(Node, connect, [Other]).
 
-store(Node, Value) ->
-    call_dht_function(Node, store, [Value]).
+store(Value) ->
+    call_dht_function(store, [Value]).
 
-pull(Node, Hash) ->
-    call_dht_function(Node, pull, [Hash]).
+pull(Hash) ->
+    call_dht_function(pull, [Hash]).
 
-remove(Node, Hash) ->
-    call_dht_function(Node, remove, [Hash]).
+remove(Hash) ->
+    call_dht_function(remove, [Hash]).
 
-kill(Node) ->
-    gen_server:call(?MODULE, {kill, Node}).
+stop(Node) ->
+    gen_server:call(?MODULE, {stop, Node}).
+
+broadcast(Msg) ->
+    call_dht_function(broadcast, [Msg]).
+
+scatter(MsgList) ->
+    call_dht_function(scatter, [MsgList]).
 
 send_code(Node) ->
     { Mod, Bin, File } = code:get_object_code(client),
@@ -87,7 +96,7 @@ handle_call({spawn_agent, Node}, _From, State) ->
             {reply, unreachable, State}
     end;
 
-handle_call({kill, Node}, _From, State) ->
+handle_call({stop, Node}, _From, State) ->
     call_dht_function(Node, stop, []),
     NS = sets:del_element(Node, State),
     case sets:to_list(NS) of
@@ -111,6 +120,15 @@ handle_call(stats, _From, State) ->
     io:format("   Each routing tables has ~p non empty buckets (average)~n", [Nemptavg / length(L)]),
     io:format("   The time we updated the last routing bucket is ~p~n", [Lupdmin]),
     {reply, done, State};
+
+handle_call({call, Fun, Args}, _From, State) ->
+    L = sets:to_list(State),
+    Out = case L of
+        [ X | _] ->
+            call_dht_function(X, Fun, Args);
+        _ -> error
+    end,
+    { reply, Out, State };
 
 handle_call(_, _From, State) ->
     {reply, [], State}.
