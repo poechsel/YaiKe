@@ -9,7 +9,7 @@ To build, just type `make`
 
 ## How to use
 
-Their is two ways to use this program
+There is two ways to use this program
 
 ### Using `dht` application
 
